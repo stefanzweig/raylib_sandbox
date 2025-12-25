@@ -428,7 +428,8 @@ endif
 # Define source code object files required
 #------------------------------------------------------------------------------------------------
 SANDBOX = \
-    sandbox/core_basic_window 
+    sandbox/core_basic_window \
+    sandbox/poe
 
 CURRENT_MAKEFILE = $(lastword $(MAKEFILE_LIST))
 
