@@ -29,6 +29,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define MAX_BOARD_SIZE 25
 #define MAX_STEPS      1000
@@ -63,6 +66,26 @@ typedef struct {
 
 /* ---- Globals for board layout ---- */
 static int board_px, board_py, cell_sz, stone_r;
+
+/* ---- File browser ---- */
+#define FB_MAX_ENTRIES 512
+#define FB_PATH_MAX    1024
+#define FB_VISIBLE     18
+
+typedef struct {
+    int  active;
+    char path[FB_PATH_MAX];
+    char entries[FB_MAX_ENTRIES][256];
+    int  is_dir[FB_MAX_ENTRIES];
+    int  count;
+    int  sel;
+    int  scroll;
+    int  cursor;
+} FileBrowser;
+
+static void fb_scan(FileBrowser *fb);
+static void fb_open(FileBrowser *fb, const char *path);
+static void fb_draw(FileBrowser *fb, int win_w, int win_h);
 
 /* ---- Board helpers ---- */
 
@@ -587,12 +610,186 @@ static void draw_info_panel(GameState *gs, int panel_x, int auto_play, float aut
     DrawText("Home/End : First / Last",  x, y, 14, DARKGRAY); y += line_h - 6;
     DrawText("F        : Auto-play",      x, y, 14, DARKGRAY); y += line_h - 6;
     DrawText("Up/Down  : Speed",          x, y, 14, DARKGRAY); y += line_h - 6;
+    DrawText("O        : Open SGF file", x, y, 14, DARKGRAY); y += line_h - 6;
     DrawText("ESC      : Quit",           x, y, 14, DARKGRAY); y += line_h + 10;
 
     if (auto_play) {
         snprintf(buf, sizeof(buf), "Auto-play: ON (%.1fs)", auto_interval);
         DrawText(buf, x, y, 16, GREEN);
     }
+}
+
+/* ================================================================================
+ *  FILE BROWSER
+ * ================================================================================ */
+
+static void fb_scan(FileBrowser *fb)
+{
+    DIR *d = opendir(fb->path);
+    if (!d) { fb->count = 0; return; }
+
+    char names[FB_MAX_ENTRIES][256];
+    int  dirs[FB_MAX_ENTRIES];
+    int  n = 0;
+
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL && n < FB_MAX_ENTRIES) {
+        if (ent->d_name[0] == '.' && ent->d_name[1] != '.' && ent->d_name[1] != '\0')
+            continue;   /* skip hidden files except ".." */
+
+        char full[FB_PATH_MAX];
+        snprintf(full, sizeof(full), "%.512s/%.255s", fb->path, ent->d_name);
+        struct stat st;
+        if (stat(full, &st) != 0) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            strcpy(names[n], ent->d_name);
+            dirs[n] = 1;
+            n++;
+        } else {
+            int len = (int)strlen(ent->d_name);
+            if (len >= 4 && strcasecmp(ent->d_name + len - 4, ".sgf") == 0) {
+                strcpy(names[n], ent->d_name);
+                dirs[n] = 0;
+                n++;
+            }
+        }
+    }
+    closedir(d);
+
+    /* Sort: ".." first, then dirs, then files (alphabetical within each) */
+    const char *ptrs[FB_MAX_ENTRIES];
+    int         isd[FB_MAX_ENTRIES];
+    for (int i = 0; i < n; i++) ptrs[i] = names[i];
+
+    /* Simple insertion sort (stable, fine for ≤512) */
+    for (int i = 1; i < n; i++) {
+        const char *kp = ptrs[i];
+        int kd = dirs[i];
+        int j = i - 1;
+        while (j >= 0) {
+            int da = (ptrs[j][0] == '.');
+            int db = (kp[0] == '.');
+            int swap = 0;
+            if (da != db) swap = (db && !da);
+            else swap = (strcmp(ptrs[j], kp) > 0);
+            if (!swap) break;
+            ptrs[j + 1] = ptrs[j];
+            isd[j + 1] = dirs[j];
+            j--;
+        }
+        ptrs[j + 1] = kp;
+        isd[j + 1] = kd;
+    }
+
+    fb->count = n;
+    for (int i = 0; i < n; i++) {
+        strncpy(fb->entries[i], ptrs[i], 255);
+        fb->entries[i][255] = '\0';
+        fb->is_dir[i] = isd[i];
+    }
+    fb->sel = 0;
+    fb->scroll = 0;
+}
+
+static void fb_open(FileBrowser *fb, const char *path)
+{
+    fb->active = 1;
+    strncpy(fb->path, path, FB_PATH_MAX - 1);
+    fb->path[FB_PATH_MAX - 1] = '\0';
+    fb->cursor = (int)strlen(fb->path);
+    fb_scan(fb);
+}
+
+static void fb_draw(FileBrowser *fb, int win_w, int win_h)
+{
+    int pw = 520, ph = 540;
+    int px = (win_w - pw) / 2, py = (win_h - ph) / 2;
+
+    /* Dim overlay */
+    DrawRectangle(0, 0, win_w, win_h, (Color){0, 0, 0, 120});
+
+    /* Panel background */
+    DrawRectangle(px, py, pw, ph, (Color){40, 40, 40, 245});
+    DrawRectangleLines(px, py, pw, ph, (Color){100, 100, 100, 255});
+
+    /* Title bar */
+    DrawRectangle(px, py, pw, 36, (Color){60, 60, 60, 255});
+    DrawText("Load SGF File", px + 14, py + 8, 20, RAYWHITE);
+    DrawText("[ESC] Close", px + pw - 110, py + 10, 14, LIGHTGRAY);
+
+    /* Path input */
+    int iy = py + 46;
+    DrawRectangle(px + 10, iy, pw - 20, 30, (Color){25, 25, 25, 255});
+    DrawRectangleLines(px + 10, iy, pw - 20, 30, (Color){120, 120, 120, 255});
+
+    /* Clip path text to fit input box */
+    char path_display[FB_PATH_MAX];
+    strncpy(path_display, fb->path, sizeof(path_display) - 1);
+    path_display[sizeof(path_display) - 1] = '\0';
+    int max_text_w = pw - 60;
+    while (MeasureText(path_display, 14) > max_text_w && strlen(path_display) > 0) {
+        memmove(path_display, path_display + 1, strlen(path_display));
+    }
+    DrawText(path_display, px + 16, iy + 7, 14, RAYWHITE);
+
+    /* Blinking cursor */
+    if ((GetTime() * 2.0) - (int)(GetTime() * 2.0) < 0.5) {
+        int cx = px + 16 + MeasureText(path_display, 14);
+        if (cx < px + pw - 30)
+            DrawRectangle(cx, iy + 5, 2, 20, RAYWHITE);
+    }
+
+    /* File list area */
+    int ly = iy + 40;
+    int lh = ph - 100;
+    DrawRectangle(px + 10, ly, pw - 20, lh, (Color){30, 30, 30, 255});
+    DrawRectangleLines(px + 10, ly, pw - 20, lh, (Color){80, 80, 80, 255});
+
+    int row_h = lh / FB_VISIBLE;
+    if (row_h < 20) row_h = 20;
+
+    /* Adjust scroll to keep selection visible */
+    if (fb->sel < fb->scroll) fb->scroll = fb->sel;
+    if (fb->sel >= fb->scroll + FB_VISIBLE) fb->scroll = fb->sel - FB_VISIBLE + 1;
+
+    for (int i = 0; i < FB_VISIBLE && fb->scroll + i < fb->count; i++) {
+        int idx = fb->scroll + i;
+        int ey = ly + i * row_h;
+
+        if (idx == fb->sel)
+            DrawRectangle(px + 11, ey, pw - 22, row_h, (Color){70, 110, 170, 255});
+
+        Color tc, ic;
+        if (fb->is_dir[idx]) {
+            tc = (idx == fb->sel) ? RAYWHITE : (Color){130, 190, 255, 255};
+            ic = (Color){130, 190, 255, 255};
+        } else {
+            tc = (idx == fb->sel) ? RAYWHITE : LIGHTGRAY;
+            ic = (Color){180, 255, 180, 255};
+        }
+
+        /* Icon: folder or file */
+        const char *icon = fb->is_dir[idx] ? "[D] " : "    ";
+        DrawText(icon, px + 16, ey + (row_h - 14) / 2, 14, ic);
+        DrawText(fb->entries[idx], px + 56, ey + (row_h - 14) / 2, 14, tc);
+    }
+
+    if (fb->count == 0) {
+        DrawText("(no .sgf files found)", px + pw / 2 - 80, ly + lh / 2 - 7, 14, GRAY);
+    }
+
+    /* Scrollbar */
+    if (fb->count > FB_VISIBLE) {
+        int sb_h = lh * FB_VISIBLE / fb->count;
+        if (sb_h < 20) sb_h = 20;
+        int sb_y = ly + (lh - sb_h) * fb->scroll / (fb->count - FB_VISIBLE);
+        DrawRectangle(px + pw - 20, sb_y, 8, sb_h, (Color){100, 100, 100, 200});
+    }
+
+    /* Bottom hint */
+    DrawText("Enter: Open/Load    Up/Down: Navigate    PgUp/PgDn: Scroll",
+             px + 14, py + ph - 22, 12, GRAY);
 }
 
 /* ================================================================================
@@ -607,10 +804,10 @@ int main(int argc, char *argv[])
     GameState gs = {0};
     gs.size = DEFAULT_BOARD_SIZE;
 
-    if (!parse_sgf(&gs, sgf_path)) {
-        fprintf(stderr, "Failed to load SGF: %s\n", sgf_path);
-        fprintf(stderr, "Usage: %s [path/to/game.sgf]\n", argv[0]);
-        return 1;
+    int sgf_loaded = parse_sgf(&gs, sgf_path);
+    if (!sgf_loaded) {
+        fprintf(stderr, "Warning: Failed to load SGF: %s\n", sgf_path);
+        fprintf(stderr, "Press 'O' in the viewer to open a file.\n");
     }
 
     board_clear(&gs);
@@ -641,52 +838,188 @@ int main(int argc, char *argv[])
     float auto_interval = 0.5f;   /* seconds between moves */
     float auto_timer    = 0.0f;
 
+    /* File browser state */
+    FileBrowser fb = {0};
+
+    /* Helper: reload game from a new SGF path */
+    #define LOAD_SGF(path) do { \
+        GameState tmp = {0}; \
+        tmp.size = DEFAULT_BOARD_SIZE; \
+        if (parse_sgf(&tmp, (path))) { \
+            board_clear(&gs); \
+            gs = tmp; \
+            board_clear(&gs); \
+            auto_play = 0; \
+            auto_timer = 0.0f; \
+            /* Recalculate layout for new board size */ \
+            cell_sz = board_area / (gs.size + 1); \
+            if (cell_sz < 16) cell_sz = 16; \
+            if (cell_sz > 44) cell_sz = 44; \
+            stone_r = cell_sz / 2 - 2; \
+            grid_px = (gs.size - 1) * cell_sz; \
+            board_px = 40 + cell_sz / 2 + 4; \
+            board_py = 40 + cell_sz / 2 + 4; \
+            panel_x = board_px + grid_px + cell_sz / 2 + 50; \
+            snprintf(title, sizeof(title), "Go Board Viewer - %s", gs.sgf_filename); \
+            SetWindowTitle(title); \
+        } \
+    } while(0)
+
     /* ---- Main loop ---- */
     while (!WindowShouldClose()) {
 
-        /* ---- Input ---- */
-        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_SPACE)) {
-            if (gs.current_step < gs.step_count) {
-                replay_to(&gs, gs.current_step + 1);
-                auto_timer = 0.0f;
+        /* ---- File browser input ---- */
+        if (fb.active) {
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                fb.active = 0;
+            } else if (IsKeyPressed(KEY_UP)) {
+                if (fb.sel > 0) fb.sel--;
+            } else if (IsKeyPressed(KEY_DOWN)) {
+                if (fb.sel < fb.count - 1) fb.sel++;
+            } else if (IsKeyPressed(KEY_PAGE_UP)) {
+                fb.sel -= FB_VISIBLE;
+                if (fb.sel < 0) fb.sel = 0;
+            } else if (IsKeyPressed(KEY_PAGE_DOWN)) {
+                fb.sel += FB_VISIBLE;
+                if (fb.sel >= fb.count) fb.sel = fb.count - 1;
+            } else if (IsKeyPressed(KEY_ENTER)) {
+                if (fb.count > 0 && fb.sel >= 0 && fb.sel < fb.count) {
+                    if (fb.is_dir[fb.sel]) {
+                        /* Navigate into directory */
+                        if (strcmp(fb.entries[fb.sel], "..") == 0) {
+                            char *last = strrchr(fb.path, '/');
+                            if (last && last != fb.path) *last = '\0';
+                            else if (last == fb.path) fb.path[1] = '\0';
+                        } else {
+                            char tmp[FB_PATH_MAX];
+                            snprintf(tmp, sizeof(tmp), "%.512s/%.255s", fb.path, fb.entries[fb.sel]);
+                            strncpy(fb.path, tmp, FB_PATH_MAX - 1);
+                            fb.path[FB_PATH_MAX - 1] = '\0';
+                        }
+                        fb.cursor = (int)strlen(fb.path);
+                        fb_scan(&fb);
+                    } else {
+                        /* Load selected SGF file */
+                        char fullpath[FB_PATH_MAX];
+                        snprintf(fullpath, sizeof(fullpath), "%.512s/%.255s",
+                                 fb.path, fb.entries[fb.sel]);
+                        LOAD_SGF(fullpath);
+                        fb.active = 0;
+                    }
+                }
+            } else if (IsKeyPressed(KEY_BACKSPACE)) {
+                if (fb.cursor > 0) {
+                    fb.cursor--;
+                    fb.path[fb.cursor] = '\0';
+                }
+            } else {
+                /* Text input for path */
+                int ch = GetKeyPressed();
+                while (ch > 0) {
+                    if (ch >= 32 && ch < 127 && fb.cursor < FB_PATH_MAX - 1) {
+                        fb.path[fb.cursor++] = (char)ch;
+                        fb.path[fb.cursor] = '\0';
+                    }
+                    ch = GetKeyPressed();
+                }
             }
-        }
-        if (IsKeyPressed(KEY_LEFT)) {
-            if (gs.current_step > 0) {
-                replay_to(&gs, gs.current_step - 1);
-                auto_timer = 0.0f;
-            }
-        }
-        if (IsKeyPressed(KEY_HOME)) {
-            replay_to(&gs, 0);
-            auto_timer = 0.0f;
-        }
-        if (IsKeyPressed(KEY_END)) {
-            replay_to(&gs, gs.step_count);
-            auto_timer = 0.0f;
-        }
-        if (IsKeyPressed(KEY_F)) {
-            auto_play = !auto_play;
-            auto_timer = 0.0f;
-        }
-        if (IsKeyPressed(KEY_UP)) {
-            auto_interval += 0.1f;
-            if (auto_interval > 5.0f) auto_interval = 5.0f;
-        }
-        if (IsKeyPressed(KEY_DOWN)) {
-            auto_interval -= 0.1f;
-            if (auto_interval < 0.1f) auto_interval = 0.1f;
-        }
 
-        /* Auto-play advance */
-        if (auto_play) {
-            auto_timer += GetFrameTime();
-            if (auto_timer >= auto_interval) {
-                auto_timer = 0.0f;
+            /* Mouse: hover highlight */
+            Vector2 mp = GetMousePosition();
+            int pw = 520, ph = 540;
+            int pxp = (win_w - pw) / 2, pyp = (win_h - ph) / 2;
+            int list_y = pyp + 46 + 40;
+            int list_h = ph - 100;
+            int row_h = list_h / FB_VISIBLE;
+            if (row_h < 20) row_h = 20;
+
+            if (mp.x >= pxp + 10 && mp.x <= pxp + pw - 10 &&
+                mp.y >= list_y && mp.y <= list_y + list_h) {
+                int hover = fb.scroll + (int)((mp.y - list_y) / row_h);
+                if (hover >= 0 && hover < fb.count) fb.sel = hover;
+            }
+
+            /* Mouse: click to select / navigate */
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                if (mp.x >= pxp + 10 && mp.x <= pxp + pw - 10 &&
+                    mp.y >= list_y && mp.y <= list_y + list_h) {
+                    int click = fb.scroll + (int)((mp.y - list_y) / row_h);
+                    if (click >= 0 && click < fb.count) {
+                        fb.sel = click;
+                        if (fb.is_dir[click]) {
+                            if (strcmp(fb.entries[click], "..") == 0) {
+                                char *last = strrchr(fb.path, '/');
+                                if (last && last != fb.path) *last = '\0';
+                                else if (last == fb.path) fb.path[1] = '\0';
+                            } else {
+                                char tmp[FB_PATH_MAX];
+                                snprintf(tmp, sizeof(tmp), "%s/%s", fb.path, fb.entries[click]);
+                                strncpy(fb.path, tmp, FB_PATH_MAX - 1);
+                                fb.path[FB_PATH_MAX - 1] = '\0';
+                            }
+                            fb.cursor = (int)strlen(fb.path);
+                            fb_scan(&fb);
+                        } else {
+                            char fullpath[FB_PATH_MAX];
+                            snprintf(fullpath, sizeof(fullpath), "%.512s/%.255s",
+                                     fb.path, fb.entries[click]);
+                            LOAD_SGF(fullpath);
+                            fb.active = 0;
+                        }
+                    }
+                }
+            }
+
+        } else {
+            /* ---- Normal game input ---- */
+            if (IsKeyPressed(KEY_O)) {
+                char cwd[FB_PATH_MAX];
+                if (getcwd(cwd, sizeof(cwd))) fb_open(&fb, cwd);
+                else fb_open(&fb, ".");
+            }
+            if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_SPACE)) {
                 if (gs.current_step < gs.step_count) {
                     replay_to(&gs, gs.current_step + 1);
-                } else {
-                    auto_play = 0;   /* reached end */
+                    auto_timer = 0.0f;
+                }
+            }
+            if (IsKeyPressed(KEY_LEFT)) {
+                if (gs.current_step > 0) {
+                    replay_to(&gs, gs.current_step - 1);
+                    auto_timer = 0.0f;
+                }
+            }
+            if (IsKeyPressed(KEY_HOME)) {
+                replay_to(&gs, 0);
+                auto_timer = 0.0f;
+            }
+            if (IsKeyPressed(KEY_END)) {
+                replay_to(&gs, gs.step_count);
+                auto_timer = 0.0f;
+            }
+            if (IsKeyPressed(KEY_F)) {
+                auto_play = !auto_play;
+                auto_timer = 0.0f;
+            }
+            if (IsKeyPressed(KEY_UP)) {
+                auto_interval += 0.1f;
+                if (auto_interval > 5.0f) auto_interval = 5.0f;
+            }
+            if (IsKeyPressed(KEY_DOWN)) {
+                auto_interval -= 0.1f;
+                if (auto_interval < 0.1f) auto_interval = 0.1f;
+            }
+
+            /* Auto-play advance */
+            if (auto_play) {
+                auto_timer += GetFrameTime();
+                if (auto_timer >= auto_interval) {
+                    auto_timer = 0.0f;
+                    if (gs.current_step < gs.step_count) {
+                        replay_to(&gs, gs.current_step + 1);
+                    } else {
+                        auto_play = 0;   /* reached end */
+                    }
                 }
             }
         }
@@ -727,9 +1060,15 @@ int main(int argc, char *argv[])
             DrawRectangleLines(bar_x, bar_y, bar_w, bar_h, GRAY);
         }
 
+        /* Draw file browser overlay (on top of everything) */
+        if (fb.active) {
+            fb_draw(&fb, win_w, win_h);
+        }
+
         EndDrawing();
     }
 
+    #undef LOAD_SGF
     CloseWindow();
     return 0;
 }
