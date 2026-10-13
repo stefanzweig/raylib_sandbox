@@ -445,15 +445,24 @@ static void draw_board(GameState *gs)
     const char *letters = "ABCDEFGHJKLMNOPQRST";  /* skip I per convention */
     for (int i = 0; i < sz && i < 25; i++) {
         int x = bx0 + i * cell_sz;
-        /* top letters */
+        int y = by0 + i * cell_sz;
+
+        /* Top column letters */
         char ls[2] = {letters[i], '\0'};
         int tw = MeasureText(ls, font_sz);
         DrawText(ls, x - tw / 2, by0 - pad + 4, font_sz, GRAY);
-        /* bottom numbers */
-        char ns[16];
-        snprintf(ns, sizeof(ns), "%d", sz - i);
-        tw = MeasureText(ns, font_sz);
-        DrawText(ns, x - tw / 2, by1 + pad - font_sz - 4, font_sz, GRAY);
+
+        /* Bottom column letters */
+        DrawText(ls, x - tw / 2, by1 + pad - font_sz - 4, font_sz, GRAY);
+
+        /* Left row numbers (1 at top) */
+        char rs[16];
+        snprintf(rs, sizeof(rs), "%d", i + 1);
+        tw = MeasureText(rs, font_sz);
+        DrawText(rs, bx0 - pad + 4, y - font_sz / 2, font_sz, GRAY);
+
+        /* Right row numbers */
+        DrawText(rs, bx1 + pad - tw - 4, y - font_sz / 2, font_sz, GRAY);
     }
 }
 
@@ -547,7 +556,7 @@ static void draw_info_panel(GameState *gs, int panel_x, int auto_play, float aut
             if (s->x >= 0 && s->x < 25 && s->y >= 0 && s->y < 25) {
                 const char *letters = "ABCDEFGHJKLMNOPQRST";
                 snprintf(coord, sizeof(coord), "%c%d",
-                         letters[s->x], gs->size - s->y);
+                         letters[s->x], s->y + 1);
             } else {
                 snprintf(coord, sizeof(coord), "pass");
             }
