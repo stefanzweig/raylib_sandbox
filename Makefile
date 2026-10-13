@@ -431,14 +431,19 @@ SANDBOX = \
     sandbox/core_basic_window \
     sandbox/poe
 
+APP = \
+    app/go_board 
+
 CURRENT_MAKEFILE = $(lastword $(MAKEFILE_LIST))
 
 # Define processes to execute
 #------------------------------------------------------------------------------------------------
 # Default target entry
-all: $(SANDBOX)
+all: $(SANDBOX) $(APP)
 
 sandbox: $(SANDBOX)
+
+app: $(APP)
 
 # Generic compilation pattern
 # NOTE: Examples must be ready for Android compilation!
