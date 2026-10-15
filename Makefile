@@ -57,8 +57,8 @@ RAYLIB_SRC_PATH       ?= ../src
 
 # Locations of raylib.h and libraylib.a/libraylib.so
 # NOTE: Those variables are only used for PLATFORM_OS: LINUX, BSD
-RAYLIB_INCLUDE_PATH   ?= /usr/local/include
-RAYLIB_LIB_PATH       ?= /usr/local/lib
+RAYLIB_INCLUDE_PATH   ?= /opt/homebrew/include
+RAYLIB_LIB_PATH       ?= /opt/homebrew/lib
 
 # Library type compilation: STATIC (.a) or SHARED (.so/.dll)
 RAYLIB_LIBTYPE        ?= STATIC
@@ -135,7 +135,11 @@ ifeq ($(PLATFORM),PLATFORM_DRM)
 endif
 
 # Define raylib release directory for compiled library
-RAYLIB_RELEASE_PATH    ?= $(RAYLIB_PATH)/src
+ifeq ($(PLATFORM_OS),OSX)
+    RAYLIB_RELEASE_PATH ?= $(RAYLIB_LIB_PATH)
+else
+    RAYLIB_RELEASE_PATH ?= $(RAYLIB_PATH)/src
+endif
 
 ifeq ($(PLATFORM),PLATFORM_WEB)
     ifeq ($(PLATFORM_OS),WINDOWS)
@@ -250,6 +254,9 @@ ifeq ($(PLATFORM),PLATFORM_DESKTOP)
     ifeq ($(PLATFORM_OS),LINUX)
         INCLUDE_PATHS += -I$(RAYLIB_INCLUDE_PATH)
     endif
+    ifeq ($(PLATFORM_OS),OSX)
+        INCLUDE_PATHS += -I$(RAYLIB_INCLUDE_PATH)
+    endif
 endif
 ifeq ($(PLATFORM),PLATFORM_DESKTOP_SDL)
     INCLUDE_PATHS += -I$(SDL_INCLUDE_PATH)
@@ -266,7 +273,11 @@ endif
 
 # Define library paths containing required libs: LDFLAGS
 #------------------------------------------------------------------------------------------------
-LDFLAGS = -L. -L$(RAYLIB_RELEASE_PATH) -L$(RAYLIB_PATH)/src
+ifeq ($(PLATFORM_OS),OSX)
+    LDFLAGS = -L. -L$(RAYLIB_RELEASE_PATH)
+else
+    LDFLAGS = -L. -L$(RAYLIB_RELEASE_PATH) -L$(RAYLIB_PATH)/src
+endif
 
 ifeq ($(PLATFORM),PLATFORM_DESKTOP)
     ifeq ($(PLATFORM_OS),WINDOWS)
@@ -429,10 +440,20 @@ endif
 #------------------------------------------------------------------------------------------------
 SANDBOX = \
     sandbox/core_basic_window \
+    sandbox/basic \
     sandbox/poe
 
 APP = \
-    app/go_board 
+    app/go_board \
+    app/game_of_life \
+    app/grid_70x68 \
+    app/kaleidoscope \
+    app/maze_trail \
+    app/prism_kaleidoscope \
+    app/ruler_canvas \
+    app/skeleton_app \
+    app/snake \
+    app/text_editor
 
 CURRENT_MAKEFILE = $(lastword $(MAKEFILE_LIST))
 
