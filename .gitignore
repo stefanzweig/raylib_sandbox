@@ -1,26 +1,24 @@
-# Compiled binaries (no extension executables)
-sandbox/core_basic_window
+# Compiled binaries
+app/game_of_life
 app/go_board
+app/grid_70x68
+app/kaleidoscope
+app/maze_trail
+app/maze_trail.ex1
+app/prism_kaleidoscope
+app/ruler_canvas
+app/skeleton_app
+app/snake
+app/text_editor
+sandbox/basic
+sandbox/core_basic_window
+sandbox/poe
+
+# Windows executables
+*.exe
 
 # Object files
 *.o
-*.exe
 
-# Generated screenshots / images
-*.png
-
-# SGF game data files
-*.sgf
-
-# Ignore VIM's backup generated files
-*.swp
-*.swo
-*~
-
-# OS files
+# macOS
 .DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
