@@ -169,7 +169,11 @@ int main(void)
         // ---- draw ----
         BeginDrawing();
         ClearBackground((Color){ 10, 8, 18, 255 });
+#if RAYLIB_VERSION_MAJOR >= 6
+        DrawCircleGradient((Vector2){ (int)center.x, (int)center.y }, 380,
+#else
         DrawCircleGradient((int)center.x, (int)center.y, 380,
+#endif
                            (Color){ 35, 25, 60, 255 },
                            (Color){ 10, 8, 18, 255 });
 

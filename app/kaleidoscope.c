@@ -173,7 +173,11 @@ int main(void)
         ClearBackground((Color){ 12, 10, 22, 255 });
 
         // Soft radial background.
+#if RAYLIB_VERSION_MAJOR >= 6
+        DrawCircleGradient((Vector2){ (int)cx, (int)cy }, 380,
+#else
         DrawCircleGradient((int)cx, (int)cy, 380,
+#endif
                            (Color){ 40, 30, 70, 255 },
                            (Color){ 12, 10, 22, 255 });
 
