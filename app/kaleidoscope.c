@@ -173,7 +173,7 @@ int main(void)
         ClearBackground((Color){ 12, 10, 22, 255 });
 
         // Soft radial background.
-        DrawCircleGradient((Vector2){ (int)cx, (int)cy }, 380,
+        DrawCircleGradient((int)cx, (int)cy, 380,
                            (Color){ 40, 30, 70, 255 },
                            (Color){ 12, 10, 22, 255 });
 
